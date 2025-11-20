@@ -1,31 +1,24 @@
-
-# dos.py — Minimal DoS rate limiting helper for Flask
-
 import time
 from collections import defaultdict
-from typing import Optional
-from flask import Request
 
-WINDOW = 10         # seconds
-MAX_REQUESTS = 20   # per window
+WINDOW = 10        # Time window in seconds
+MAX_REQUESTS = 20  # Maximum requests allowed in the time window
 
-_requests = defaultdict(list)  # ip -> [timestamps]
+request_log = defaultdict(list)  # For each IP it store the timestamps of requests
 
-def check_dos(request: Request) -> Optional[tuple]:
-    """
-    Returns a Flask-style (message, status_code) tuple if blocked, else None.
-    To be called inside @app.before_request hook.
-    """
-    ip = request.remote_addr or "unknown"
-    now = time.time()
-    bucket = _requests[ip]
+def check_dos(request):  # A function to check for DoS attacks
+    ip = request.remote_addr or "unknown"   # Get requester IP address
+    now = time.time()   # Current timestamp
+    timestamps = request_log[ip]  # List of timestamps for this IP
 
-    # drop entries outside window
-    while bucket and now - bucket[0] > WINDOW:
-        bucket.pop(0)
+    # Remove timetamps that are outside the time window
+    while timestamps and now - timestamps[0] > WINDOW:
+        timestamps.pop(0)
 
-    if len(bucket) >= MAX_REQUESTS:
-        return ("Too many requests (DoS protection). Try later.", 429)
+    # If the number of requests exceed the limit, then block and return an error
+    if len(timestamps) >= MAX_REQUESTS:
+        return ("Too many requests, try again later.", 429)
 
-    bucket.append(now)
+    # Otherwise, allow and log the current request timestamp
+    timestamps.append(now)
     return None
