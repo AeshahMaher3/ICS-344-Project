@@ -1,17 +1,17 @@
-
-# signatures.py — ECDSA sign/verify helpers
-
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives import hashes
 
-def sign(priv, data: bytes) -> bytes:
-    """Sign data with ECDSA (SHA-256)."""
-    return priv.sign(data, ec.ECDSA(hashes.SHA256()))
+# Create a digital signature for the data using a private key
+def sign(private, data):
+    return private.sign(data, ec.ECDSA(hashes.SHA256())) # Sign the data with ECDSA and SHA-256
 
-def verify(pub, sig: bytes, data: bytes) -> bool:
-    """Verify ECDSA signature; return True on success, False otherwise."""
+def verify(public, signature, data):
+    # Try to verify the signature with the specified public key
     try:
-        pub.verify(sig, data, ec.ECDSA(hashes.SHA256()))
+        public.verify(signature, data, ec.ECDSA(hashes.SHA256()))
         return True
+    
+    # If verification fails, return false
     except Exception:
         return False
+    
