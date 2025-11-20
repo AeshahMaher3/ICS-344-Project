@@ -1,11 +1,12 @@
-# replay.py — Replay detection using seen nonces per receiver
-
 from collections import defaultdict
 
-_seen_nonces = defaultdict(set)  # receiver -> {nonce_bytes}
+nonce_history = defaultdict(set)  # Stores nonce for each reciever
 
-def is_replay(receiver: str, nonce: bytes) -> bool:
-    if nonce in _seen_nonces[receiver]:
-        return True
-    _seen_nonces[receiver].add(nonce)
-    return False
+def check_replay(receiver, nonce):  # A function to check for replay attacks
+    # Check if the nonce has been seen before
+    if nonce in nonce_history[receiver]:
+        return True, "Replay attack detected."
+    
+    # If not seen the  store the nonce
+    nonce_history[receiver].add(nonce)
+    return False, "No replay detected."
