@@ -1,5 +1,5 @@
 import os, time, base64
-from flask import Flask, render_template_string, request, redirect, url_for, flash, jsonify
+from flask import Flask, render_template_string, request, redirect, url_for, flash
 
 # Local security modules
 from dos import check_dos
@@ -9,189 +9,331 @@ from signatures import sign, verify
 from ecdh import (
     aes_encrypt, aes_decrypt,
     ec_generate_keypair, ec_derive_aes_key,
-    pub_to_pem, pem_to_pub,
+    pub_to_pem,
 )
 
-# -------------------------
-# Flask app + in-memory storage
-# -------------------------
+# Flask Setup
 app = Flask(__name__)
 app.secret_key = os.urandom(16)
 
-# Users:  { username: {priv, pub, pem} }
-users = {}
+users = {}       # { username: {priv, pub, pem} }
+messages = []    # list of message dictionaries
 
-# Messages list
-messages = []
-
-# -------------------------
-# DoS protection
-# -------------------------
+# DoS Protection
 @app.before_request
 def _dos_guard():
     resp = check_dos(request)
     if resp is not None:
         return resp
 
-# -------------------------
-# UI Template (Inline HTML)
-# -------------------------
+# Frontend
 PAGE = """
 <!doctype html>
 <html>
 <head>
   <meta charset="utf-8">
-  <title>Secure Messaging (Modular)</title>
+  <title>Secure Chat</title>
   <style>
-    body{font-family:Arial;background:#f5f7fb;margin:0}
-    h1{background:#283593;color:#fff;margin:0;padding:16px}
-    .wrap{max-width:1000px;margin:20px auto;background:#fff;padding:16px;border-radius:8px}
-    section{border-bottom:1px solid #ddd;margin-bottom:16px;padding-bottom:12px}
-    .flash{padding:8px;margin:6px 0;border-radius:4px;background:#e3f2fd;color:#1565c0}
-    table{width:100%;border-collapse:collapse;font-size:12px}
-    th,td{border:1px solid #ccc;padding:4px;text-align:left}
-    td.small{max-width:300px;word-wrap:break-word}
-    button{background:#3949ab;color:#fff;border:none;padding:6px 12px;border-radius:4px;cursor:pointer}
-    button:hover{background:#303f9f}
-    textarea{width:100%}
-    .row{display:flex;gap:8px;flex-wrap:wrap}
-    input[type=text],input[type=number]{padding:6px}
+    :root {
+      --bg: #05060A;
+      --panel: #0C0E15;
+      --blue: #42A5F5;
+      --blue-strong: #1E88E5;
+      --blue-glow: rgba(66,165,245,0.4);
+      --text: #E3F2FD;
+      --dim: #90A4AE;
+    }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Arial, sans-serif;
+      background: radial-gradient(circle at top, #0E1628, #02030A);
+      color: var(--text);
+      height: 100vh;
+      display: flex;
+      align-items: stretch;
+      justify-content: center;
+    }
+    .shell {
+      width: 100%;
+      max-width: 1100px;
+      margin: 16px;
+      background: rgba(5,7,14,0.92);
+      border-radius: 16px;
+      display: flex;
+      overflow: hidden;
+      border: 1px solid #102030;
+      box-shadow: 0 0 25px rgba(30,136,229,0.25);
+    }
+    .side {
+      width: 280px;
+      background: #070A12;
+      padding: 18px;
+      border-right: 1px solid #102030;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+    .title {
+      font-size: 1.25rem;
+      font-weight: 600;
+      margin-bottom: 10px;
+      color: var(--blue);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      text-shadow: 0 0 8px var(--blue-glow);
+    }
+    .flash {
+      background: rgba(30,136,229,0.12);
+      border: 1px solid var(--blue);
+      color: var(--blue);
+      padding: 8px;
+      border-radius: 6px;
+      font-size: 0.8rem;
+    }
+    h3 {
+      font-size: 0.85rem;
+      color: var(--dim);
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+    .card {
+      background: var(--panel);
+      padding: 12px;
+      border-radius: 10px;
+      border: 1px solid #0E2035;
+    }
+    input[type=text],
+    input[type=number],
+    textarea {
+      width: 100%;
+      padding: 6px 10px;
+      background: #0A0D16;
+      border: 1px solid #103050;
+      color: var(--text);
+      border-radius: 8px;
+      outline: none;
+      font-size: 0.85rem;
+    }
+    input:focus, textarea:focus {
+      border-color: var(--blue);
+      box-shadow: 0 0 0 2px var(--blue-glow);
+    }
+    textarea { resize: vertical; min-height: 50px; }
+    .btn {
+      background: var(--blue);
+      color: #000C1A;
+      border: none;
+      padding: 8px 14px;
+      border-radius: 999px;
+      font-size: 0.8rem;
+      cursor: pointer;
+      font-weight: 600;
+      transition: 0.15s;
+    }
+    .btn:hover {
+      background: var(--blue-strong);
+      box-shadow: 0 0 10px var(--blue-glow);
+    }
+    .btn.secondary {
+      background: transparent;
+      border: 1px solid var(--blue);
+      color: var(--blue);
+    }
+    .btn.secondary:hover {
+      background: rgba(66,165,245,0.08);
+    }
+
+    .main {
+      flex: 1;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+    }
+    .chat-box {
+      flex: 1;
+      background: #05070D;
+      border-radius: 12px;
+      border: 1px solid #102030;
+      padding: 12px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .bubble {
+      max-width: 70%;
+      padding: 10px 12px;
+      border-radius: 14px;
+      font-size: 0.85rem;
+      line-height: 1.3;
+    }
+    .bubble.other {
+      background: #0E1621;
+      color: var(--text);
+      border-left: 3px solid var(--blue);
+    }
+    .chat-input {
+      margin-top: 10px;
+      display: flex;
+      gap: 10px;
+      align-items: flex-end;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.75rem;
+      margin-top: 10px;
+    }
+    th, td {
+      border: 1px solid #102030;
+      padding: 5px;
+      text-align: left;
+    }
+    th {
+      background: #0E1621;
+      color: var(--dim);
+    }
+    td.small {
+      max-width: 260px;
+      word-wrap: break-word;
+    }
   </style>
 </head>
+
 <body>
-<h1>Secure Messaging – AES-GCM • ECDH • ECDSA (Modular)</h1>
-<div class="wrap">
+<div class="shell">
 
-  {% with msgs = get_flashed_messages() %}
-    {% if msgs %}
-      {% for m in msgs %}<div class="flash">{{ m }}</div>{% endfor %}
-    {% endif %}
-  {% endwith %}
+  <!-- LEFT SIDE -->
+  <div class="side">
+    <div class="title">Secure Messaging App</div>
 
-  <section>
-    <h3>1) Generate Keys</h3>
-    <form method="post" action="{{ url_for('generate_keys') }}">
-      <div class="row">
-        <input type="text" name="username" placeholder="Alice" required>
-        <button type="submit">Generate ECC Keys</button>
-      </div>
-    </form>
-    <p>Users: {% for u in users %}<b>{{u}}</b>&nbsp;{% else %}<i>none</i>{% endfor %}</p>
-  </section>
-
-  <section>
-    <h3>2) Send Encrypted + Signed</h3>
-    <form method="post" action="{{ url_for('send_message') }}">
-      <div class="row">
-        <input type="text" name="sender" placeholder="Alice" required>
-        <input type="text" name="receiver" placeholder="Bob" required>
-      </div>
-      <p><textarea name="plaintext" rows="4" placeholder="Message..." required></textarea></p>
-      <button type="submit">Encrypt, Sign & Send</button>
-    </form>
-  </section>
-
-  <section>
-    <h3>3) Messages</h3>
-    {% if messages %}
-      <table>
-        <tr><th>ID</th><th>From</th><th>To</th><th>Timestamp</th><th>Nonce</th><th>Ciphertext</th></tr>
-        {% for m in messages %}
-          <tr>
-            <td>{{m.id}}</td><td>{{m.sender}}</td><td>{{m.receiver}}</td>
-            <td>{{m.timestamp}}</td>
-            <td class="small">{{m.nonce}}</td>
-            <td class="small">{{m.ciphertext}}</td>
-          </tr>
+    {% with msgs = get_flashed_messages() %}
+      {% if msgs %}
+        {% for m in msgs %}
+          <div class="flash">{{ m }}</div>
         {% endfor %}
-      </table>
-    {% else %}
-      <i>No messages yet</i>
-    {% endif %}
-  </section>
+      {% endif %}
+    {% endwith %}
 
-  <section>
-    <h3>4) Receive & Verify</h3>
-    <form method="post" action="{{ url_for('receive_message') }}">
-      <div class="row">
-        <input type="text" name="receiver_view" placeholder="Bob" required>
-        <input type="number" name="message_id" placeholder="0" min="0" required>
-        <button type="submit">Verify & Decrypt</button>
+    <div class="card">
+      <h3>Generate Keys</h3>
+      <form method="post" action="{{ url_for('generate_keys') }}">
+        <input type="text" name="username" placeholder="Username" required>
+        <button class="btn" type="submit">Generate</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <h3>Receive</h3>
+      <form method="post" action="{{ url_for('receive_message') }}">
+        <input type="text" name="receiver_view" placeholder="Receiver" required>
+        <input type="number" name="message_id" placeholder="ID" min="0" required>
+        <button class="btn secondary" type="submit">Open</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <h3>Tamper</h3>
+      <form method="post" action="{{ url_for('tamper_attack') }}">
+        <input type="text" name="receiver_view_tamper" placeholder="Receiver" required>
+        <input type="number" name="tamper_id" placeholder="ID" min="0" required>
+        <button class="btn secondary" type="submit">Tamper</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <h3>Phishing</h3>
+      <a href="{{ url_for('phishing_page') }}" style="color:var(--blue);text-decoration:none;">
+        Open Fake Login →
+      </a>
+    </div>
+  </div>
+
+  <!-- RIGHT SIDE -->
+  <div class="main">
+
+    <!-- Messages -->
+    <div class="chat-box">
+      {% if messages %}
+        {% for m in messages %}
+        <div class="bubble other">
+          <b>#{{m.id}}</b> {{m.sender}} → {{m.receiver}}<br>
+          <small style="color:var(--dim);">nonce:</small> {{m.nonce}}<br>
+          <small style="color:var(--dim);">cipher:</small> {{m.ciphertext}}
+        </div>
+        {% endfor %}
+      {% else %}
+        <div style="color:var(--dim);margin:auto;">No messages yet.</div>
+      {% endif %}
+    </div>
+
+    <!-- Send -->
+    <form method="post" action="{{ url_for('send_message') }}">
+      <div class="chat-input">
+        <input type="text" name="sender" placeholder="Sender" required style="max-width:120px;">
+        <input type="text" name="receiver" placeholder="Receiver" required style="max-width:120px;">
+        <textarea name="plaintext" placeholder="Type message..." required></textarea>
+        <button class="btn" type="submit">Send</button>
       </div>
     </form>
-    <p>Includes: Replay detection, signature check, and AES-GCM integrity.</p>
-  </section>
 
-  <section>
-    <h3>5) Tampering Attack</h3>
-    <form method="post" action="{{ url_for('tamper_attack') }}">
-      <div class="row">
-        <input type="text" name="receiver_view_tamper" placeholder="Bob" required>
-        <input type="number" name="tamper_id" placeholder="0" min="0" required>
-        <button type="submit">Tamper & Try Decrypt</button>
-      </div>
-    </form>
-  </section>
+    <!-- Raw Table -->
+    <table>
+      <tr><th>ID</th><th>From</th><th>To</th><th>Timestamp</th><th>Nonce</th><th>Ciphertext</th></tr>
+      {% for m in messages %}
+      <tr>
+        <td>{{m.id}}</td>
+        <td>{{m.sender}}</td>
+        <td>{{m.receiver}}</td>
+        <td>{{m.timestamp}}</td>
+        <td class="small">{{m.nonce}}</td>
+        <td class="small">{{m.ciphertext}}</td>
+      </tr>
+      {% endfor %}
+    </table>
 
-  <section>
-    <h3>6) Phishing Demo</h3>
-    <p><a href="{{ url_for('phishing_page') }}" target="_blank">Open Fake Login</a></p>
-  </section>
+  </div>
 
 </div>
 </body>
 </html>
 """
 
-# -------------------------
-# ROUTES
-# -------------------------
+# Routes
 @app.route("/")
 def home():
-    return render_template_string(PAGE, users=list(users.keys()), messages=messages)
+    return render_template_string(PAGE, users=users.keys(), messages=messages)
 
 @app.route("/generate_keys", methods=["POST"])
 def generate_keys():
-    username = request.form.get("username", "").strip()
+    username = request.form.get("username","").strip()
     if not username:
         flash("Username required.")
         return redirect(url_for("home"))
-
     priv, pub = ec_generate_keypair()
-    users[username] = {
-        "priv": priv,
-        "pub": pub,
-        "pem": pub_to_pem(pub)
-    }
+    users[username] = {"priv": priv, "pub": pub, "pem": pub_to_pem(pub)}
     flash(f"Keys generated for {username}.")
     return redirect(url_for("home"))
 
 @app.route("/send", methods=["POST"])
 def send_message():
-    sender = request.form.get("sender", "").strip()
-    receiver = request.form.get("receiver", "").strip()
-    plaintext = request.form.get("plaintext", "")
+    sender = request.form.get("sender","").strip()
+    receiver = request.form.get("receiver","").strip()
+    plaintext = request.form.get("plaintext","")
 
     if sender not in users or receiver not in users:
         flash("Both sender and receiver must have keys.")
         return redirect(url_for("home"))
 
-    if not plaintext:
-        flash("Message cannot be empty.")
-        return redirect(url_for("home"))
-
-    # Derive shared AES key
     aes_key = ec_derive_aes_key(users[sender]["priv"], users[receiver]["pub"])
-
-    # Encrypt using AES-GCM
     nonce, ciphertext = aes_encrypt(aes_key, plaintext)
 
-    # Prepare signed data
     timestamp = int(time.time())
     data = f"{sender}|{receiver}|{timestamp}".encode() + nonce + ciphertext
     signature = sign(users[sender]["priv"], data)
 
-    # Store message
     msg_id = len(messages)
     messages.append({
         "id": msg_id,
@@ -208,67 +350,11 @@ def send_message():
 
 @app.route("/receive", methods=["POST"])
 def receive_message():
-    receiver = request.form.get("receiver_view", "").strip()
-    msg_id_str = request.form.get("message_id", "").strip()
+    receiver = request.form.get("receiver_view","").strip()
+    mid = request.form.get("message_id","").strip()
 
     if receiver not in users:
-        flash("Receiver must have keys.")
-        return redirect(url_for("home"))
-
-    if not msg_id_str.isdigit() or int(msg_id_str) >= len(messages):
-        flash("Invalid message ID.")
-        return redirect(url_for("home"))
-
-    msg = messages[int(msg_id_str)]
-    sender = msg["sender"]
-
-    if sender not in users:
-        flash("Sender keys missing.")
-        return redirect(url_for("home"))
-
-    nonce = base64.b64decode(msg["nonce"])
-    ciphertext = base64.b64decode(msg["ciphertext"])
-    signature = base64.b64decode(msg["signature"])
-    timestamp = msg["timestamp"]
-
-    # Replay detection
-    replay, _ = check_replay(receiver, nonce)
-
-    # Derive AES key
-    aes_key = ec_derive_aes_key(users[receiver]["priv"], users[sender]["pub"])
-
-    # Prepare signed data
-    data = f"{sender}|{receiver}|{timestamp}".encode() + nonce + ciphertext
-
-    # Verify signature
-    ok_sig = verify(users[sender]["pub"], signature, data)
-
-    status = []
-    if ok_sig:
-        status.append("Signature OK")
-        try:
-            pt = aes_decrypt(aes_key, nonce, ciphertext)
-            status.append("Decryption OK")
-        except Exception:
-            pt = ""
-            status.append("Decryption FAILED (tampered)")
-    else:
-        pt = ""
-        status.append("Signature FAILED")
-
-    if replay:
-        status.append("Replay detected")
-
-    flash(f"Open msg #{msg['id']} → {' | '.join(status)}. Plaintext: {pt}")
-    return redirect(url_for("home"))
-
-@app.route("/tamper", methods=["POST"])
-def tamper_attack():
-    receiver = request.form.get("receiver_view_tamper", "").strip()
-    mid = request.form.get("tamper_id", "").strip()
-
-    if receiver not in users:
-        flash("Receiver must have keys.")
+        flash("Receiver has no keys.")
         return redirect(url_for("home"))
 
     if not mid.isdigit() or int(mid) >= len(messages):
@@ -278,48 +364,81 @@ def tamper_attack():
     msg = messages[int(mid)]
     sender = msg["sender"]
 
-    if sender not in users:
-        flash("Sender keys missing.")
+    nonce = base64.b64decode(msg["nonce"])
+    ciphertext = base64.b64decode(msg["ciphertext"])
+    signature = base64.b64decode(msg["signature"])
+    timestamp = msg["timestamp"]
+
+    replay, _ = check_replay(receiver, nonce)
+
+    aes_key = ec_derive_aes_key(users[receiver]["priv"], users[sender]["pub"])
+    data = f"{sender}|{receiver}|{timestamp}".encode() + nonce + ciphertext
+    ok = verify(users[sender]["pub"], signature, data)
+
+    status = []
+    if ok:
+        try:
+            pt = aes_decrypt(aes_key, nonce, ciphertext)
+            status.append(f"Decrypted: {pt}")
+        except:
+            status.append("Decryption FAILED")
+    else:
+        status.append("Signature FAILED")
+
+    if replay:
+        status.append("Replay detected")
+
+    flash(" | ".join(status))
+    return redirect(url_for("home"))
+
+@app.route("/tamper", methods=["POST"])
+def tamper_attack():
+    receiver = request.form.get("receiver_view_tamper","").strip()
+    mid = request.form.get("tamper_id","").strip()
+
+    if receiver not in users:
+        flash("Receiver has no keys.")
         return redirect(url_for("home"))
+
+    if not mid.isdigit() or int(mid) >= len(messages):
+        flash("Invalid ID.")
+        return redirect(url_for("home"))
+
+    msg = messages[int(mid)]
+    sender = msg["sender"]
 
     nonce = base64.b64decode(msg["nonce"])
     ciphertext = base64.b64decode(msg["ciphertext"])
     signature = base64.b64decode(msg["signature"])
 
-    # Tamper the ciphertext
-    tampered_ct = tamper_ciphertext(ciphertext)
+    tampered = tamper_ciphertext(ciphertext)
 
     aes_key = ec_derive_aes_key(users[receiver]["priv"], users[sender]["pub"])
-
-    data = f"{sender}|{receiver}|{msg['timestamp']}".encode() + nonce + tampered_ct
-    ok_sig = verify(users[sender]["pub"], signature, data)
+    data = f"{sender}|{receiver}|{msg['timestamp']}".encode() + nonce + tampered
+    ok = verify(users[sender]["pub"], signature, data)
 
     status = []
-    if not ok_sig:
-        status.append("Signature FAILED (tampered)")
-    else:
-        status.append("Signature unexpectedly OK")
-
+    if not ok:
+        status.append("Signature FAILED")
     try:
-        _ = aes_decrypt(aes_key, nonce, tampered_ct)
+        aes_decrypt(aes_key, nonce, tampered)
         status.append("Decryption unexpectedly OK")
-    except Exception:
-        status.append("Decryption FAILED (expected for tampering)")
+    except:
+        status.append("Decryption FAILED")
 
-    flash(f"Tamper msg #{msg['id']} → {' | '.join(status)}")
+    flash(" | ".join(status))
     return redirect(url_for("home"))
 
 @app.route("/phishing")
 def phishing_page():
     return """
-    <h1>Secure Messenger - Login</h1>
-    <p style="color:red;">WARNING: Fake page for phishing demo.</p>
+    <h1 style='font-family:Segoe UI;'>Fake Secure Chat Login</h1>
+    <p style='color:red;'>This is a phishing simulation.</p>
     <form>
-      <label>Username: <input type="text" name="u"></label><br>
-      <label>Password: <input type="password" name="p"></label><br>
-      <button type="submit">Login</button>
+        Username: <input><br><br>
+        Password: <input type='password'><br><br>
+        <button>Login</button>
     </form>
-    <p>Explain in your report why checking URL and HTTPS is important.</p>
     """
 
 if __name__ == "__main__":
