@@ -1,16 +1,14 @@
-
-# app.py — Flask app (imports helpers from separate modules)
 import os, time, base64
 from flask import Flask, render_template_string, request, redirect, url_for, flash, jsonify
 
-# Local modules
+# Local security modules
 from dos import check_dos
 from tamper import tamper_ciphertext
-from replay import is_replay
+from replay import check_replay
 from signatures import sign, verify
 from ecdh import (
-    aes_encrypt, aes_decrypt, 
-    ec_generate_keypair, ec_derive_aes_key, 
+    aes_encrypt, aes_decrypt,
+    ec_generate_keypair, ec_derive_aes_key,
     pub_to_pem, pem_to_pub,
 )
 
@@ -20,13 +18,14 @@ from ecdh import (
 app = Flask(__name__)
 app.secret_key = os.urandom(16)
 
-# users: { name: {priv, pub, pem} }
+# Users:  { username: {priv, pub, pem} }
 users = {}
-# messages: list of dict
+
+# Messages list
 messages = []
 
 # -------------------------
-# DoS guard (using helper)
+# DoS protection
 # -------------------------
 @app.before_request
 def _dos_guard():
@@ -35,7 +34,7 @@ def _dos_guard():
         return resp
 
 # -------------------------
-# UI (simple inline template)
+# UI Template (Inline HTML)
 # -------------------------
 PAGE = """
 <!doctype html>
@@ -74,7 +73,7 @@ PAGE = """
     <form method="post" action="{{ url_for('generate_keys') }}">
       <div class="row">
         <input type="text" name="username" placeholder="Alice" required>
-        <button type="submit">Generate ECC keys</button>
+        <button type="submit">Generate ECC Keys</button>
       </div>
     </form>
     <p>Users: {% for u in users %}<b>{{u}}</b>&nbsp;{% else %}<i>none</i>{% endfor %}</p>
@@ -153,47 +152,46 @@ def home():
 
 @app.route("/generate_keys", methods=["POST"])
 def generate_keys():
-    from ecdh import ec_generate_keypair, pub_to_pem  # local import to avoid circular
-    username = request.form.get("username","").strip()
+    username = request.form.get("username", "").strip()
     if not username:
-        flash("Username required")
+        flash("Username required.")
         return redirect(url_for("home"))
+
     priv, pub = ec_generate_keypair()
     users[username] = {
         "priv": priv,
         "pub": pub,
         "pem": pub_to_pem(pub)
     }
-    flash(f"Keys generated for {username}")
+    flash(f"Keys generated for {username}.")
     return redirect(url_for("home"))
-
-@app.route("/get_public_key")
-def get_public_key():
-    username = request.args.get("username","")
-    info = users.get(username)
-    if not info:
-        return jsonify({"error":"user not found"}), 404
-    return jsonify({"username": username, "public_key": info["pem"]})
 
 @app.route("/send", methods=["POST"])
 def send_message():
-    sender = request.form.get("sender","").strip()
-    receiver = request.form.get("receiver","").strip()
-    plaintext = request.form.get("plaintext","")
+    sender = request.form.get("sender", "").strip()
+    receiver = request.form.get("receiver", "").strip()
+    plaintext = request.form.get("plaintext", "")
 
     if sender not in users or receiver not in users:
         flash("Both sender and receiver must have keys.")
         return redirect(url_for("home"))
+
     if not plaintext:
-        flash("Message empty.")
+        flash("Message cannot be empty.")
         return redirect(url_for("home"))
 
+    # Derive shared AES key
     aes_key = ec_derive_aes_key(users[sender]["priv"], users[receiver]["pub"])
+
+    # Encrypt using AES-GCM
     nonce, ciphertext = aes_encrypt(aes_key, plaintext)
+
+    # Prepare signed data
     timestamp = int(time.time())
     data = f"{sender}|{receiver}|{timestamp}".encode() + nonce + ciphertext
     signature = sign(users[sender]["priv"], data)
 
+    # Store message
     msg_id = len(messages)
     messages.append({
         "id": msg_id,
@@ -204,37 +202,45 @@ def send_message():
         "ciphertext": base64.b64encode(ciphertext).decode(),
         "signature": base64.b64encode(signature).decode(),
     })
+
     flash(f"Message #{msg_id} sent.")
     return redirect(url_for("home"))
 
 @app.route("/receive", methods=["POST"])
 def receive_message():
-    receiver = request.form.get("receiver_view","").strip()
-    msg_id_str = request.form.get("message_id","").strip()
+    receiver = request.form.get("receiver_view", "").strip()
+    msg_id_str = request.form.get("message_id", "").strip()
+
     if receiver not in users:
         flash("Receiver must have keys.")
         return redirect(url_for("home"))
+
     if not msg_id_str.isdigit() or int(msg_id_str) >= len(messages):
-        flash("Invalid message id.")
+        flash("Invalid message ID.")
         return redirect(url_for("home"))
 
     msg = messages[int(msg_id_str)]
-    nonce = base64.b64decode(msg["nonce"])
-    ciphertext = base64.b64decode(msg["ciphertext"])
-    signature = base64.b64decode(msg["signature"])
     sender = msg["sender"]
-    timestamp = msg["timestamp"]
 
     if sender not in users:
         flash("Sender keys missing.")
         return redirect(url_for("home"))
 
-    # Replay check
-    replay = is_replay(receiver, nonce)
+    nonce = base64.b64decode(msg["nonce"])
+    ciphertext = base64.b64decode(msg["ciphertext"])
+    signature = base64.b64decode(msg["signature"])
+    timestamp = msg["timestamp"]
 
-    # Derive key and verify/decrypt
+    # Replay detection
+    replay, _ = check_replay(receiver, nonce)
+
+    # Derive AES key
     aes_key = ec_derive_aes_key(users[receiver]["priv"], users[sender]["pub"])
+
+    # Prepare signed data
     data = f"{sender}|{receiver}|{timestamp}".encode() + nonce + ciphertext
+
+    # Verify signature
     ok_sig = verify(users[sender]["pub"], signature, data)
 
     status = []
@@ -245,7 +251,7 @@ def receive_message():
             status.append("Decryption OK")
         except Exception:
             pt = ""
-            status.append("Decryption FAILED (tampered/wrong key)")
+            status.append("Decryption FAILED (tampered)")
     else:
         pt = ""
         status.append("Signature FAILED")
@@ -258,17 +264,20 @@ def receive_message():
 
 @app.route("/tamper", methods=["POST"])
 def tamper_attack():
-    receiver = request.form.get("receiver_view_tamper","").strip()
-    mid = request.form.get("tamper_id","").strip()
+    receiver = request.form.get("receiver_view_tamper", "").strip()
+    mid = request.form.get("tamper_id", "").strip()
+
     if receiver not in users:
         flash("Receiver must have keys.")
         return redirect(url_for("home"))
+
     if not mid.isdigit() or int(mid) >= len(messages):
-        flash("Invalid message id.")
+        flash("Invalid message ID.")
         return redirect(url_for("home"))
 
     msg = messages[int(mid)]
     sender = msg["sender"]
+
     if sender not in users:
         flash("Sender keys missing.")
         return redirect(url_for("home"))
@@ -277,9 +286,12 @@ def tamper_attack():
     ciphertext = base64.b64decode(msg["ciphertext"])
     signature = base64.b64decode(msg["signature"])
 
-    t_ct = tamper_ciphertext(ciphertext)
+    # Tamper the ciphertext
+    tampered_ct = tamper_ciphertext(ciphertext)
+
     aes_key = ec_derive_aes_key(users[receiver]["priv"], users[sender]["pub"])
-    data = f"{sender}|{receiver}|{msg['timestamp']}".encode() + nonce + t_ct
+
+    data = f"{sender}|{receiver}|{msg['timestamp']}".encode() + nonce + tampered_ct
     ok_sig = verify(users[sender]["pub"], signature, data)
 
     status = []
@@ -289,10 +301,10 @@ def tamper_attack():
         status.append("Signature unexpectedly OK")
 
     try:
-        _ = aes_decrypt(aes_key, nonce, t_ct)
+        _ = aes_decrypt(aes_key, nonce, tampered_ct)
         status.append("Decryption unexpectedly OK")
     except Exception:
-        status.append("Decryption FAILED (as expected for tampering)")
+        status.append("Decryption FAILED (expected for tampering)")
 
     flash(f"Tamper msg #{msg['id']} → {' | '.join(status)}")
     return redirect(url_for("home"))
@@ -307,9 +319,8 @@ def phishing_page():
       <label>Password: <input type="password" name="p"></label><br>
       <button type="submit">Login</button>
     </form>
-    <p>Explain in your report why checking URL/TLS is important.</p>
+    <p>Explain in your report why checking URL and HTTPS is important.</p>
     """
 
 if __name__ == "__main__":
-    # Run
     app.run(debug=True)
