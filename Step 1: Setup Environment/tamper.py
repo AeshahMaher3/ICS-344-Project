@@ -1,8 +1,11 @@
+def tamper_ciphertext(ciphertext: bytes): # this function is used to test tampering
 
-# tamper.py — Simple tampering utility
+    if not ciphertext: # check if ciphertext is empty
+        return ciphertext, "No tampering applied"
+    
 
-def tamper_ciphertext(ct: bytes) -> bytes:
-    """Flip first bit of ciphertext for demo purposes."""
-    if not ct:
-        return ct
-    return bytes([ct[0] ^ 0x01]) + ct[1:]
+    modified_byte = ciphertext[0] ^ 0x01  # take the first byte, flip its first bit using XOR, then add the rest of the bytes back
+    modified_ciphertext = bytes([modified_byte]) + ciphertext[1:]  
+ 
+    return modified_ciphertext, "Tampering applied"
+ 
