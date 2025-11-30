@@ -1,6 +1,8 @@
 import os, time, base64
 from flask import Flask, render_template_string, request, redirect, url_for, flash
 
+
+
 # Import frontend class
 from ui import UI
 
@@ -12,7 +14,7 @@ from signatures import sign, verify
 from ecdh import (
     aes_encrypt, aes_decrypt,
     ec_generate_keypair, ec_derive_aes_key,
-    pub_to_pem,
+    public_to_pem,
 )
 
 # Flask setup
@@ -171,12 +173,107 @@ def tamper_attack():
     flash(" | ".join(status))
     return redirect(url_for("home"))
 
-# Fake phishing page
-@app.route("/phishing")
-def phishing_page():
+
+
+  # Phishing 
+
+@app.route("/phishing_form", methods=["GET", "POST"])
+def phishing_form():
+    # If user submitted the form (POST), show warning page
+    if request.method == "POST":
+        return """
+        <!doctype html>
+        <html>
+        <head>
+          <meta charset='utf-8'>
+          <title>You Have Been Phished!</title>
+          <style>
+            body {
+              margin:0;
+              font-family:"Segoe UI", Arial, sans-serif;
+              background: radial-gradient(circle at top, #0E1628, #02030A);
+              color:#E3F2FD;
+              height:100vh;
+              display:flex;
+              align-items:center;
+              justify-content:center;
+              text-align:center;
+            }
+            .box{
+              background:rgba(5,7,14,0.92);
+              border:1px solid #102030;
+              border-radius:16px;
+              padding:40px 60px;
+              box-shadow:0 0 25px rgba(30,136,229,0.25);
+              max-width: 520px;
+            }
+            h1{color:#E53935;text-shadow:0 0 10px rgba(229,57,53,0.4);}
+            p{color:#90A4AE;font-size:1.05rem;}
+          </style>
+        </head>
+        <body>
+          <div class='box'>
+            <h1>🚨 YOU HAVE BEEN PHISHED! 🚨</h1>
+            <p>Never enter your banking or card information on untrusted links</p>
+          </div>
+        </body>
+        </html>
+        """
+
+    # Otherwise (GET), show the fake bank form
     return """
-    <h1>Fake Login Page</h1>
-    <p style='color:red;'>Phishing Demo</p>
+    <!doctype html>
+    <html>
+    <head>
+      <meta charset='utf-8'>
+      <title>Prize Claim Form</title>
+      <style>
+        body {
+          margin: 0;
+          font-family: "Segoe UI", Arial, sans-serif;
+          background: radial-gradient(circle at top, #0E1628, #02030A);
+          color: #E3F2FD;
+          height: 100vh;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .box {
+          background: rgba(5,7,14,0.92);
+          border: 1px solid #102030;
+          border-radius: 16px;
+          padding: 40px 60px;
+          box-shadow: 0 0 25px rgba(30,136,229,0.25);
+          text-align: center;
+          max-width: 420px;
+        }
+        h1 { color:#42A5F5; text-shadow:0 0 10px rgba(66,165,245,0.4); margin-bottom:20px; }
+        label { display:block; margin:12px 0 6px; font-size:0.9rem; color:#90A4AE; text-align:left; }
+        input {
+          width:100%; padding:8px 10px; border-radius:8px; border:1px solid #103050;
+          background:#0A0D16; color:#E3F2FD; outline:none; font-size:0.9rem;
+        }
+        input:focus { border-color:#42A5F5; box-shadow:0 0 0 2px rgba(66,165,245,0.3); }
+        button {
+          margin-top:20px; background:#42A5F5; color:#000C1A; border:none;
+          padding:10px 18px; border-radius:10px; font-weight:600; cursor:pointer;
+        }
+        button:hover { background:#1E88E5; box-shadow:0 0 10px rgba(66,165,245,0.4); }
+      </style>
+    </head>
+    <body>
+      <div class="box">
+        <h1> Claim Your Prize</h1>
+        <form method="post" action="/phishing_form">
+          <label>Bank Account Number (5 digits)</label>
+          <input type="text" name="bank" maxlength="5" pattern="\\d{5}" required>
+          <label>Security Code (3 digits)</label>
+          <input type="password" name="code" maxlength="3" pattern="\\d{3}" required>
+          <button type="submit">Submit</button>
+        </form>
+      </div>
+    </body>
+    </html>
     """
 
 if __name__ == "__main__":
