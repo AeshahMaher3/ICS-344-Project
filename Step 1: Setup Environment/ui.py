@@ -212,10 +212,39 @@ class UI:
     </div>
 
     <div class="card">
-      <a href="{{ url_for('phishing_page') }}" style="color:var(--blue); text-decoration:none;">
-        Phishing Demo →
+      <a href="{{ url_for('phishing_form') }}" style="color:var(--blue); text-decoration:none;">
+        Share and Win! 
       </a>
+
+      <img src="https://cdn.corporatefinanceinstitute.com/assets/money-2.jpeg"
+       class="phishing-img">
     </div>
+
+<style>
+  .phishing-img {
+    width: 100%;
+    border-radius: 10px;
+    box-shadow: 0 0 12px rgba(66,165,245,0.3);
+    animation: pulseGlow 2.2s ease-in-out infinite;
+  }
+
+  @keyframes pulseGlow {
+    0% {
+      box-shadow: 0 0 10px rgba(66,165,245,0.25);
+      transform: scale(1);
+    }
+    50% {
+      box-shadow: 0 0 16px rgba(66,165,245,0.45);
+      transform: scale(1.03);
+    }
+    100% {
+      box-shadow: 0 0 10px rgba(66,165,245,0.25);
+      transform: scale(1);
+    }
+  }
+</style>
+
+
   </div>
 
   <!-- RIGHT SIDE -->
