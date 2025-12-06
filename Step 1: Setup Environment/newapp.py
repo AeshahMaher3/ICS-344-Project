@@ -47,7 +47,7 @@ def generate_keys():
         return redirect(url_for("home"))
 
     priv, pub = ec_generate_keypair()
-    users[username] = {"priv": priv, "pub": pub, "pem": pub_to_pem(pub)}
+    users[username] = {"priv": priv, "pub": pub, "pem": public_to_pem(pub)}
 
     flash(f"Keys generated for {username}.")
     return redirect(url_for("home"))
