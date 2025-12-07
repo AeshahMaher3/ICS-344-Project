@@ -153,7 +153,7 @@ def tamper_attack():
     ciphertext = base64.b64decode(msg["ciphertext"])
     signature = base64.b64decode(msg["signature"])
 
-    tampered = tamper_ciphertext(ciphertext)
+    tampered, _ = tamper_ciphertext(ciphertext)
 
     aes_key = ec_derive_aes_key(users[receiver]["priv"], users[sender]["pub"])
 
